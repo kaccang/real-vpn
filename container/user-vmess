@@ -1,0 +1,105 @@
+#!/bin/bash
+CONFIG="/etc/xray/config.json"
+DOMAIN=$(cat /etc/xray/domain 2>/dev/null || echo "example.com")
+TLS_PORT=443
+NTLS_PORT=80
+PATH_VMESS="/vmess"
+
+UA_LIST=(chrome firefox android safari)
+UA=${UA_LIST[$((RANDOM % ${#UA_LIST[@]}))]}
+
+clear
+
+ACCOUNTS=()
+last_id=""
+while IFS= read -r line; do
+    case "$line" in
+        *'"id":'*)
+            vid=$(echo "$line" | sed -n 's/.*"id":[[:space:]]*"\([^"]*\)".*/\1/p')
+            last_id="$vid"
+            ;;
+        '### '*)
+            user=$(echo "$line" | awk '{print $2}')
+            exp=$(echo "$line" | awk '{print $3}')
+            if [ -n "$user" ] && [ -n "$last_id" ]; then
+                ACCOUNTS+=("$user|$exp|$last_id")
+            fi
+            ;;
+    esac
+done < "$CONFIG"
+
+if [ "${#ACCOUNTS[@]}" -eq 0 ]; then
+    echo "Tidak ada akun vmess (###)"
+    exit 0
+fi
+
+echo "╔══════════════════════════════╗"
+echo "║         CEK VMESS XRAY       ║"
+echo "╚══════════════════════════════╝"
+for i in "${!ACCOUNTS[@]}"; do
+    IFS="|" read -r u e id <<< "${ACCOUNTS[$i]}"
+    printf " %2d. %-15s %s\n" $((i+1)) "$u" "$e"
+done
+echo ""
+
+read -rp "Pilih nomor [1-${#ACCOUNTS[@]}]: " N
+[[ ! "$N" =~ ^[0-9]+$ ]] && { echo "invalid"; exit 1; }
+(( N<1 || N>${#ACCOUNTS[@]} )) && { echo "invalid"; exit 1; }
+
+SEL="${ACCOUNTS[$((N-1))]}"
+IFS="|" read -r USER EXP UUID <<< "$SEL"
+
+# JSON TLS
+JSON_TLS=$(cat <<EOF
+{
+  "v": "2",
+  "ps": "$USER",
+  "add": "$DOMAIN",
+  "port": "$TLS_PORT",
+  "id": "$UUID",
+  "aid": "0",
+  "net": "ws",
+  "type": "none",
+  "host": "$DOMAIN",
+  "path": "$PATH_VMESS",
+  "tls": "tls"
+}
+EOF
+)
+
+# JSON NTLS
+JSON_NTLS=$(cat <<EOF
+{
+  "v": "2",
+  "ps": "$USER",
+  "add": "$DOMAIN",
+  "port": "$NTLS_PORT",
+  "id": "$UUID",
+  "aid": "0",
+  "net": "ws",
+  "type": "none",
+  "host": "$DOMAIN",
+  "path": "$PATH_VMESS",
+  "tls": ""
+}
+EOF
+)
+
+VMESS_TLS="vmess://$(echo -n "$JSON_TLS" | base64 -w 0)"
+VMESS_NTLS="vmess://$(echo -n "$JSON_NTLS" | base64 -w 0)"
+
+clear
+echo "────────────────────────────"
+echo "  VMESS WS ACCOUNT"
+echo "────────────────────────────"
+echo "User       : $USER"
+echo "Expired    : $EXP"
+echo "Domain     : $DOMAIN"
+echo "Path       : $PATH_VMESS"
+echo "User-Agent : $UA"
+echo "────────────────────────────"
+echo "TLS  : $VMESS_TLS"
+echo "NTLS : $VMESS_NTLS"
+echo "────────────────────────────"
+read -n 1 -s -r -p "Press any key..."
+command -v menu >/dev/null 2>&1 && menu

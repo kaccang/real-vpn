@@ -1,0 +1,97 @@
+#!/bin/bash
+## ini didalam container ya nggak ada systemctl jadi kamu harus kreatif, pake supervisior mungkin?
+## fiturnya jangan diganti ya, cukup edit agar support didalam docker container
+clear
+red() { echo -e "\\033[32;1m${*}\\033[0m"; }
+
+CITY=$(cat /etc/xray/city)
+domain=$(cat /etc/xray/domain)
+until [[ $user =~ ^[a-zA-Z0-9_]+$ && ${CLIENT_EXISTS} == '0' ]]; do
+echo -e "\033[1;93m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo -e "\e[42m Add Xray/Vmess Account \E[0m"
+echo -e "\033[1;93m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+
+read -rp "User: " -e user
+CLIENT_EXISTS=$(grep -w $user /etc/xray/config.json | wc -l)
+
+if [[ ${CLIENT_EXISTS} == '1' ]]; then
+clear
+echo -e "\033[1;93m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo -e "\e[42m Add Xray/Vmess Account \E[0m"
+echo -e "\033[1;93m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo ""
+echo "A client with the specified name was already created, please choose another name."
+echo ""
+echo -e "\033[1;93m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+read -n 1 -s -r -p "Press any key to back on menu"
+### oh iya script ini kayaknya gak ngefilter untuk username dengan perbedaan huruf besar dan kecil, contoh user sudah ada tapi dia pake huruf besar (contoh USER01) tidak terdeteksi begitu juga sebaliknya kecil semua, kalo aku masukan user01, dan aku punya user yg bernama USER01 gak terbaca begitu juga sebaliknya, initnya jangan bikin case sensitif disini ya, perbaiki bagian filternya
+menu
+fi
+done
+
+# Array berisi pilihan browser
+brow=(chrome firefox edge android)
+browser=${brow[$RANDOM % ${#brow[@]}]}
+
+uuid=$(cat /proc/sys/kernel/random/uuid)
+read -p "Expired (days): " masaaktif
+exp=$(date -d "$masaaktif days" +"%Y-%m-%d")
+sed -i '/#vmess$/a\### '"$user $exp"'\
+},{"id": "'""$uuid""'","alterId": '"0"',"email": "'""$user""'"' /etc/xray/config.json
+exp=$(date -d "$masaaktif days" +"%Y-%m-%d")
+clear
+VMESS_WS=`cat<<EOF
+      {
+      "v": "2",
+      "ps": "$user",
+      "add": "${domain}",
+      "port": "443",
+      "id": "${uuid}",
+      "aid": "0",
+      "net": "ws",
+      "path": "/vmess",
+      "type": "none",
+      "host": "${domain}",
+      "tls": "tls",
+      "fp": "${browser}"
+}
+EOF`
+VMESS_NON_TLS=`cat<<EOF
+      {
+      "v": "2",
+      "ps": "$user",
+      "add": "${domain}",
+      "port": "80",
+      "id": "${uuid}",
+      "aid": "0",
+      "net": "ws",
+      "path": "/vmess",
+      "type": "none",
+      "host": "${domain}",
+      "tls": "none",
+      "fp": "${browser}"
+}
+EOF`
+
+vmesslink1="vmess://$(echo $VMESS_WS | base64 -w 0)"
+vmesslink2="vmess://$(echo $VMESS_NON_TLS | base64 -w 0)"
+
+# Output Informasi Akun
+echo -e "───────────────────"
+echo -e "         Add Xray/Vmess Account"
+echo -e "───────────────────"
+echo -e "Remarks     : $user"
+echo -e "Domain      : $domain"
+echo -e "Port Tls    : 443"
+echo -e "Port Ntls   : 80"
+echo -e "Encryption  : none"
+echo -e "Path        : /vmess"
+echo -e "Expired On  : $exp"
+echo -e "───────────────────"
+echo -e "TLS Link: $vmesslink1"
+echo -e "───────────────────"
+echo -e "Non-TLS Link: $vmesslink2"
+echo -e "───────────────────"
+supervisorctl restart xray # diganti dengan supervisior?
+read -n 1 -s -r -p "Press any key to back on menu"
+menu

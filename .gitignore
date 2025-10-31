@@ -1,0 +1,85 @@
+# ===== core build / docker =====
+# image hasil build gak perlu
+*.tar
+*.img
+
+# docker stuff lokal
+.dockerignore
+docker-compose.override.yml
+
+# ===== log / runtime =====
+logs/
+log/
+*.log
+/var/log/
+/opt/xray/*/log/
+/opt/xray/*/backup/
+/opt/xray/*/tmp/
+
+# ===== file user/container =====
+# state port otomatis
+/opt/xray/.ports
+
+# daftar user yang KELOKALAN
+/opt/xray/profiles.json
+
+# tiap user punya dir sendiri → jangan ke git
+/opt/xray/*/
+/opt/xray/*/**
+
+# ... tapi kita MAU simpan file skrip utama:
+!/opt/xray/cert.sh
+!/opt/xray/menu*.sh
+!/opt/xray/install*.sh
+!/opt/xray/install.sh
+!/opt/xray/xray-install.sh
+!/opt/xray/entrypoint.sh
+!/opt/xray/Dockerfile
+!/opt/xray/container/**
+!/opt/xray/*.md
+
+# ===== secrets / cert / token =====
+# jangan pernah commit ini
+*.key
+*.crt
+*.pem
+*.p12
+*.cer
+*.csr
+*.der
+
+# yang kamu bilang sendiri:
+.env
+.token
+/.token
+/opt/xray/.token
+/opt/xray/*.token
+
+# rclone config
+rclone.conf
+.rclone.conf
+/root/.config/rclone/rclone.conf
+/opt/xray/.rclone.conf
+
+# acme.sh
+/root/.acme.sh/
+/home/*/.acme.sh/
+
+# ===== nginx lokal (hasil generate) =====
+/etc/nginx/conf.d/xray-*.conf
+
+# ===== editor / OS =====
+*.swp
+*.swo
+*.bak
+*.tmp
+*~
+.DS_Store
+Thumbs.db
+
+# ===== python / misc (kalau kamu uji2an) =====
+__pycache__/
+*.pyc
+
+# ===== backup hasil cron di container =====
+/opt/xray/*/backup/**

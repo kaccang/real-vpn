@@ -1,0 +1,57 @@
+#!/bin/bash
+
+# === Konfigurasi === # ganti dengan .env?
+TOKEN="0987654321:AAG7Lqfy"
+CHAT_ID="123456789"
+
+# Fungsi escape karakter Markdown
+escape_md() {
+    echo "$1" | sed 's/[_\*`]/\\&/g'
+}
+
+# === Ambil Data ===
+IP=$(curl -4 -s ipv4.icanhazip.com || echo "Tidak terdeteksi")
+Domain=$(cat /etc/xray/domain)
+HOST=$(hostname)
+WAKTU=$(TZ="Asia/Jakarta" date "+%H:%M WIB")
+VNSTAT_DATA=$(vnstat -m --oneline 2>/dev/null)
+
+# === Cek Data ===
+if [ -z "$VNSTAT_DATA" ]; then
+    curl -s -X POST "https://api.telegram.org/bot$TOKEN/sendMessage" \
+         -d chat_id="$CHAT_ID" \
+         -d text="$(escape_md "⚠️ Error: Data vnstat tidak tersedia")"
+    exit 1
+fi
+
+# === Parse Data Bulan Ini ===
+IFS=';' read -a vnstat_array <<< "$VNSTAT_DATA"
+
+# Ambil data bulan terakhir (index 7-10)
+BULAN="${vnstat_array[7]}"       # Format: 2025-04
+RX="${vnstat_array[8]}"          # rx bulan ini
+TX="${vnstat_array[9]}"          # tx bulan ini
+TOTAL="${vnstat_array[10]}"      # total bulan ini
+AVG="${vnstat_array[11]}"        # avg bulan ini
+
+# === Format Pesan ===
+PESAN="🖥 *$(escape_md "$HOST")* 
+📡 IP: \`$(escape_md "$IP")\`
+🌐 Domain: \`$(escape_md "$Domain")\`
+⏰ Waktu: $(escape_md "$WAKTU")
+📅 Bulan: $(escape_md "$BULAN")
+
+📊 Bandwidth Usage:
+⬇️ Down: \`$(escape_md "$RX")\`
+⬆️ Up: \`$(escape_md "$TX")\`
+🔁 Total: \`$(escape_md "$TOTAL")\`
+📶 Avg: \`$(escape_md "$AVG")\`"
+
+# === Kirim ke Telegram ===
+sleep "$((RANDOM % 30))"
+curl -s -X POST "https://api.telegram.org/bot$TOKEN/sendMessage" \
+     -d chat_id="$CHAT_ID" \
+     -d text="$PESAN" \
+     -d parse_mode="Markdown"
+
+#echo $PESAN

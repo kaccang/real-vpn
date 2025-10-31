@@ -1,0 +1,96 @@
+#!/bin/bash
+# delete VMESS di dalam container, pilih berdasarkan NOMOR
+# vmess ditandai di /etc/xray/config.json dengan prefix: ### username exp
+
+CONFIG=/etc/xray/config.json
+
+clear
+echo -e "\033[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo -e "\E[44;1;39m ⇱ Delete VMESS Account ⇲ \E[0m"
+echo -e "\033[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+
+# ambil semua baris vmess (pakai ###)
+mapfile -t LINES < <(grep -E "^### " "$CONFIG")
+
+NUMBER_OF_CLIENTS=${#LINES[@]}
+if [[ $NUMBER_OF_CLIENTS -eq 0 ]]; then
+    echo " • You dont have any existing VMESS clients!"
+    echo -e "\033[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+    read -n 1 -s -r -p " Press any key to back on menu"
+    command -v menu >/dev/null 2>&1 && menu
+    exit 0
+fi
+
+# simpen ke array nama & exp
+NAMES=()
+EXPS=()
+i=0
+for line in "${LINES[@]}"; do
+    # format di config: "### username expired"
+    name=$(echo "$line" | awk '{print $2}')
+    exp=$(echo "$line"  | awk '{print $3}')
+    NAMES[$i]="$name"
+    EXPS[$i]="$exp"
+    i=$((i+1))
+done
+
+# tampilkan pakai nomor
+idx=1
+for ((i=0; i<${#NAMES[@]}; i++)); do
+    printf " %2d  %-15s %s\n" "$idx" "${NAMES[$i]}" "${EXPS[$i]}"
+    idx=$((idx+1))
+done
+
+echo ""
+echo -e " • [NOTE] Tekan ENTER kosong untuk balik ke menu"
+echo -e "\033[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+read -rp " Pilih nomor (1-${NUMBER_OF_CLIENTS}) : " choice
+
+# kalau kosong -> balik
+if [[ -z "$choice" ]]; then
+    command -v menu >/dev/null 2>&1 && menu
+    exit 0
+fi
+
+# cek angka
+if ! [[ "$choice" =~ ^[0-9]+$ ]]; then
+    echo "Input bukan angka."
+    read -n 1 -s -r -p " Press any key to back on menu"
+    command -v menu >/dev/null 2>&1 && menu
+    exit 1
+fi
+
+# cek range
+if (( choice < 1 || choice > NUMBER_OF_CLIENTS )); then
+    echo "Nomor di luar daftar."
+    read -n 1 -s -r -p " Press any key to back on menu"
+    command -v menu >/dev/null 2>&1 && menu
+    exit 1
+fi
+
+# ambil index array (0-based)
+idx=$((choice-1))
+user="${NAMES[$idx]}"
+exp="${EXPS[$idx]}"
+
+# hapus blok user ini dari config
+# prefix-nya ### (bukan #! dan bukan #&)
+sed -i "/^### $user $exp/,/^},{/d" "$CONFIG"
+
+# restart xray via supervisorctl
+# ganti 'xray' kalau nama program di supervisornya beda
+supervisorctl restart xray >/dev/null 2>&1
+
+clear
+echo -e "\033[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo -e "\E[44;1;39m ⇱ Delete VMESS Account ⇲ \E[0m"
+echo -e "\033[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo -e " • Account Deleted Successfully"
+echo -e ""
+echo -e " • Client Name : $user"
+echo -e " • Expired On  : $exp"
+echo -e "\033[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo ""
+read -n 1 -s -r -p " Press any key to back on menu"
+echo
+command -v menu >/dev/null 2>&1 && menu

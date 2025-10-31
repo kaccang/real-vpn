@@ -1,0 +1,88 @@
+#!/bin/bash
+# renew vmess (marker: ###)
+
+CONFIG="/etc/xray/config.json"
+
+restart_xray() {
+    if command -v supervisorctl >/dev/null 2>&1; then
+        supervisorctl restart xray >/dev/null 2>&1
+    else
+        pkill -x xray >/dev/null 2>&1
+    fi
+}
+
+clear
+mapfile -t LINES < <(grep -E "^### " "$CONFIG")
+NUM=${#LINES[@]}
+
+if [[ $NUM -eq 0 ]]; then
+    echo "─────────────────────────────────────────"
+    echo "          Renew VMESS Account            "
+    echo "─────────────────────────────────────────"
+    echo " Tidak ada client vmess!"
+    echo "─────────────────────────────────────────"
+    read -n 1 -s -r -p "Press any key to back on menu"
+    command -v menu >/dev/null 2>&1 && menu
+    exit 0
+fi
+
+echo "─────────────────────────────────────────"
+echo "          Renew VMESS Account            "
+echo "─────────────────────────────────────────"
+echo " No.  Username        Expired"
+echo "─────────────────────────────────────────"
+
+NAMES=()
+EXPS=()
+for i in "${!LINES[@]}"; do
+    name=$(echo "${LINES[$i]}" | awk '{print $2}')
+    exp=$(echo "${LINES[$i]}"  | awk '{print $3}')
+    NAMES[$i]="$name"
+    EXPS[$i]="$exp"
+    printf " %2d) %-14s %s\n" "$((i+1))" "$name" "$exp"
+done
+echo "─────────────────────────────────────────"
+
+while :; do
+    read -rp "Select number [1-$NUM] (ENTER=back): " CH
+    [[ -z "$CH" ]] && { command -v menu >/dev/null 2>&1 && menu; exit 0; }
+    [[ "$CH" =~ ^[0-9]+$ ]] || { echo "Harus angka."; continue; }
+    (( CH>=1 && CH<=NUM )) && break
+    echo "Nomor di luar range."
+done
+
+idx=$((CH-1))
+user="${NAMES[$idx]}"
+old_exp="${EXPS[$idx]}"
+
+read -rp "Tambah berapa hari: " add_days
+if ! [[ "$add_days" =~ ^[0-9]+$ ]]; then
+    echo "Input harus angka!"
+    read -n 1 -s -r -p "Press any key to back on menu"
+    command -v menu >/dev/null 2>&1 && menu
+    exit 1
+fi
+
+today=$(date +%Y-%m-%d)
+old_s=$(date -d "$old_exp" +%s 2>/dev/null || date -d "$today" +%s)
+now_s=$(date -d "$today" +%s)
+remain=$(( (old_s - now_s) / 86400 ))
+[[ $remain -lt 0 ]] && remain=0
+new_total=$((remain + add_days))
+new_exp=$(date -d "$today + $new_total days" +%Y-%m-%d)
+
+sed -i "s/^### $user $old_exp/### $user $new_exp/" "$CONFIG"
+
+restart_xray
+
+clear
+echo "─────────────────────────────────────────"
+echo "  VMESS Account Successfully Renewed      "
+echo "─────────────────────────────────────────"
+echo " Client Name : $user"
+echo " Old Exp     : $old_exp"
+echo " Add Days    : $add_days"
+echo " New Exp     : $new_exp"
+echo "─────────────────────────────────────────"
+read -n 1 -s -r -p "Press any key to back on menu"
+command -v menu >/dev/null 2>&1 && menu

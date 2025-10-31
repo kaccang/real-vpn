@@ -1,0 +1,70 @@
+#!/bin/bash
+CONFIG="/etc/xray/config.json"
+DOMAIN=$(cat /etc/xray/domain 2>/dev/null || echo "example.com")
+TLS_PORT=443
+NTLS_PORT=80
+PATH_TROJAN="/trojan"
+
+# user-agent pendek
+UA_LIST=(chrome firefox android safari)
+UA=${UA_LIST[$((RANDOM % ${#UA_LIST[@]}))]}
+
+clear
+
+ACCOUNTS=()
+last_pass=""
+while IFS= read -r line; do
+    case "$line" in
+        *'"password":'*)
+            pw=$(echo "$line" | sed -n 's/.*"password":[[:space:]]*"\([^"]*\)".*/\1/p')
+            last_pass="$pw"
+            ;;
+        '#!'*)
+            user=$(echo "$line" | awk '{print $2}')
+            exp=$(echo "$line" | awk '{print $3}')
+            if [ -n "$user" ] && [ -n "$last_pass" ]; then
+                ACCOUNTS+=("$user|$exp|$last_pass")
+            fi
+            ;;
+    esac
+done < "$CONFIG"
+
+if [ "${#ACCOUNTS[@]}" -eq 0 ]; then
+    echo "Tidak ada akun trojan (#!)"
+    exit 0
+fi
+
+echo "╔══════════════════════════════╗"
+echo "║        CEK TROJAN XRAY       ║"
+echo "╚══════════════════════════════╝"
+for i in "${!ACCOUNTS[@]}"; do
+    IFS="|" read -r u e p <<< "${ACCOUNTS[$i]}"
+    printf " %2d. %-15s %s\n" $((i+1)) "$u" "$e"
+done
+echo ""
+
+read -rp "Pilih nomor [1-${#ACCOUNTS[@]}]: " N
+[[ ! "$N" =~ ^[0-9]+$ ]] && { echo "invalid"; exit 1; }
+(( N<1 || N>${#ACCOUNTS[@]} )) && { echo "invalid"; exit 1; }
+
+SEL="${ACCOUNTS[$((N-1))]}"
+IFS="|" read -r USER EXP PASS <<< "$SEL"
+
+TLS_LINK="trojan://${PASS}@${DOMAIN}:${TLS_PORT}?type=ws&path=${PATH_TROJAN}&host=${DOMAIN}&sni=${DOMAIN}&security=tls#${USER}"
+NTLS_LINK="trojan://${PASS}@${DOMAIN}:${NTLS_PORT}?type=ws&path=${PATH_TROJAN}&host=${DOMAIN}#${USER}"
+
+clear
+echo "────────────────────────────"
+echo "  TROJAN WS ACCOUNT"
+echo "────────────────────────────"
+echo "User       : $USER"
+echo "Expired    : $EXP"
+echo "Domain     : $DOMAIN"
+echo "Path       : $PATH_TROJAN"
+echo "User-Agent : $UA"
+echo "────────────────────────────"
+echo "TLS  : $TLS_LINK"
+echo "NTLS : $NTLS_LINK"
+echo "────────────────────────────"
+read -n 1 -s -r -p "Press any key..."
+command -v menu >/dev/null 2>&1 && menu

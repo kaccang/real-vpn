@@ -1,0 +1,287 @@
+#!/bin/bash
+
+# ==========================
+# WARNA
+# ==========================
+GREEN="\e[32m"
+CYAN="\e[36m"
+YELLOW="\e[33m"
+RED="\e[31m"
+NC="\e[0m"
+
+# ==========================
+# KONFIG
+# ==========================
+CONFIG=/etc/xray/config.json
+LICENSE_V2_URL="https://s3.tebi.io/v2ray/v2/license.txt"   # <-- license v2 di cloud
+VNSTAT_IFACE="eth0"        # ganti kalau bukan eth0
+MAX_BW_GB=4096             # 0 = matikan pembatasan TX
+
+# ID lisensi per-KONTAINER
+LICENSE_ID=${LICENSE_ID_OVERRIDE:-$(hostname -s)}
+
+# ==========================
+# FUNGSI BANTU
+# ==========================
+status_color() {
+    case "$1" in
+        Running|Active) echo -e "${GREEN}$1${NC}" ;;
+        Expired|BW-Exhausted|Stopped|Failed) echo -e "${RED}$1${NC}" ;;
+        *) echo -e "${YELLOW}$1${NC}" ;;
+    esac
+}
+
+get_xray_status() {
+    if command -v supervisorctl >/dev/null 2>&1; then
+        s=$(supervisorctl status xray 2>/dev/null | awk '{print $2}')
+        case "$s" in
+            RUNNING) echo "Running" ;;
+            STOPPED) echo "Stopped" ;;
+            FATAL) echo "Failed" ;;
+            *) echo "Unknown" ;;
+        esac
+        return
+    fi
+    if pgrep -x xray >/dev/null 2>&1; then
+        echo "Running"
+    else
+        echo "Stopped"
+    fi
+}
+
+start_xray() {
+    if command -v supervisorctl >/dev/null 2>&1; then
+        supervisorctl start xray >/dev/null 2>&1
+        return
+    fi
+    if command -v xray >/dev/null 2>&1; then
+        xray run -config /etc/xray/config.json >/dev/null 2>&1 &
+    fi
+}
+
+stop_xray() {
+    if command -v supervisorctl >/dev/null 2>&1; then
+        supervisorctl stop xray >/dev/null 2>&1
+        return
+    fi
+    pkill -x xray >/dev/null 2>&1
+}
+
+# ambil TX dari vnstat (hari ini / versi oneline)
+get_vnstat_tx_gb() {
+    if ! command -v vnstat >/dev/null 2>&1; then
+        echo "0|not_available"
+        return
+    fi
+
+    line=$(vnstat -i "$VNSTAT_IFACE" --oneline 2>/dev/null)
+    [ -z "$line" ] && echo "0|not_available" && return
+
+    # format vnstat 2.x: 1;eth0;YYYY-MM-DD;RX;TX;TOTAL;...
+    tx_field=$(echo "$line" | awk -F';' '{print $5}')
+    [ -z "$tx_field" ] && tx_field=$(echo "$line" | awk -F';' '{print $11}')
+
+    tx_val=$(echo "$tx_field" | awk '{print $1}')
+    tx_unit=$(echo "$tx_field" | awk '{print $2}')
+
+    if [ -z "$tx_val" ]; then
+        echo "0|not_available"
+        return
+    fi
+
+    case "$tx_unit" in
+        GiB|GB) tx_gb="$tx_val" ;;
+        MiB|MB) tx_gb=$(awk -v v="$tx_val" 'BEGIN {printf "%.2f", v/1024}') ;;
+        KiB|kB) tx_gb=$(awk -v v="$tx_val" 'BEGIN {printf "%.4f", v/1024/1024}') ;;
+        *) tx_gb="0" ;;
+    esac
+
+    echo "${tx_gb}|${tx_field}"
+}
+
+# ==========================
+# INFO SISTEM
+# ==========================
+OS_INFO=$(lsb_release -ds 2>/dev/null || grep '^NAME=' /etc/os-release | cut -d\" -f2)
+KERNEL_INFO=$(uname -sr)
+UPTIME_INFO=$(uptime -p | sed 's/up //')
+DISK_USAGE=$(df -h / | awk 'NR==2 {print $2 " / " $3 " (" $5 ")"}')
+CPU_MODEL=$(awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo)
+CPU_CORES=$(nproc)
+RAM_USED=$(free -m | awk '/Mem:/ {print $3}')
+RAM_TOTAL=$(free -m | awk '/Mem:/ {print $2}')
+ISP=$(cat /etc/xray/isp 2>/dev/null || echo "Unknown")
+IP=$(curl -s -4 ifconfig.me 2>/dev/null || echo "0.0.0.0")
+
+# ==========================
+# CEK LICENSE v2 (per-KONTAINER, pakai hostname -s)
+# ==========================
+license_info=$(curl -s "$LICENSE_V2_URL")
+v2_line=$(echo "$license_info" | grep -E "^$LICENSE_ID\|" | head -n1)
+
+days=0
+lic_note="-"
+
+if [ -n "$v2_line" ]; then
+    exp_date=$(echo "$v2_line" | cut -d'|' -f2)
+    lic_note=$(echo "$v2_line" | cut -d'|' -f3-)
+    if date -d "$exp_date" >/dev/null 2>&1; then
+        exp_sec=$(date -d "$exp_date" +%s)
+        now_sec=$(date +%s)
+        diff_sec=$((exp_sec - now_sec))
+        days=$((diff_sec / 86400))
+        (( days < 0 )) && days=0
+    fi
+else
+    # kalau ID gak ada di license v2 → anggap expired
+    days=0
+fi
+
+# ==========================
+# CEK BW
+# ==========================
+TX_RESULT=$(get_vnstat_tx_gb)
+TX_GB=${TX_RESULT%%|*}
+TX_RAW=${TX_RESULT#*|}
+TX_GB_INT=${TX_GB%.*}
+BW_EXCEEDED=0
+if [[ "$TX_GB_INT" =~ ^[0-9]+$ ]]; then
+    if [ "$MAX_BW_GB" -gt 0 ] && [ "$TX_GB_INT" -ge "$MAX_BW_GB" ]; then
+        BW_EXCEEDED=1
+    fi
+fi
+
+# ==========================
+# KONTROL XRAY
+# ==========================
+if [[ $days -eq 0 ]]; then
+    stop_xray
+    XRAY_STATUS=$(status_color "Expired")
+else
+    if [[ $BW_EXCEEDED -eq 1 ]]; then
+        stop_xray
+        XRAY_STATUS=$(status_color "BW-Exhausted")
+    else
+        start_xray
+        XRAY_STATUS=$(status_color "$(get_xray_status)")
+    fi
+fi
+
+# ==========================
+# HITUNG AKUN XRAY
+# ==========================
+VMESS_COUNT=$(grep '^### ' "$CONFIG" 2>/dev/null | awk '{print $2}' | sort -u | wc -l)
+VLESS_COUNT=$(grep '^#& ' "$CONFIG" 2>/dev/null | awk '{print $2}' | sort -u | wc -l)
+TROJAN_COUNT=$(grep '^#! ' "$CONFIG" 2>/dev/null | awk '{print $2}' | sort -u | wc -l)
+
+# ==========================
+# TAMPILAN
+# ==========================
+clear
+echo "--------------------------------------------"
+echo "           SYSTEM INFORMATION               "
+echo "--------------------------------------------"
+echo -e " ${GREEN}OS          :${NC} $OS_INFO"
+echo -e " ${GREEN}Kernel      :${NC} $KERNEL_INFO"
+echo -e " ${GREEN}Uptime      :${NC} $UPTIME_INFO"
+echo -e " ${CYAN}CPU         :${NC} $CPU_MODEL (${CPU_CORES} cores)"
+echo -e " ${CYAN}Disk Usage  :${NC} $DISK_USAGE"
+echo -e " ${CYAN}RAM Usage   :${NC} ${RAM_USED}MB / ${RAM_TOTAL}MB"
+echo -e " ${YELLOW}Organization:${NC} $ISP"
+echo -e " ${YELLOW}Public IP   :${NC} $IP"
+echo "--------------------------------------------"
+echo "           SERVICE STATUS                   "
+echo "--------------------------------------------"
+echo -e " Nginx Status    : N/A (host)"
+echo -e " Xray Status     : $XRAY_STATUS"
+
+if [[ $days -eq 0 ]]; then
+    echo -e " License (v2)    : ${RED}EXPIRED${NC}"
+else
+    echo -e " License (v2)    : ${GREEN}${days} days${NC} (id: $LICENSE_ID)"
+fi
+
+if [[ "$lic_note" != "-" ]]; then
+    echo -e " License note    : $lic_note"
+fi
+
+if [[ "$TX_RAW" == "not_available" ]]; then
+    echo -e " Bandwidth (TX)  : ${YELLOW}vnstat unavailable${NC}"
+else
+    echo -e " Bandwidth (TX)  : ${CYAN}${TX_RAW}${NC} (${TX_GB} GB) / ${MAX_BW_GB} GB"
+fi
+echo "--------------------------------------------"
+
+if [[ $days -eq 0 ]]; then
+    echo -e "${RED} LISENSI V2 EXPIRED${NC}"
+    echo "--------------------------------------------"
+fi
+if [[ $BW_EXCEEDED -eq 1 ]]; then
+    echo -e "${RED} BANDWIDTH HABIS (TX)${NC}"
+    echo "--------------------------------------------"
+fi
+
+echo -e ""
+echo -e "┌────────────────────────────────────────────┐"
+echo -e "│            XRAY VPN ACCOUNT STATUS         │"
+echo -e "├────────────────────────────────────────────┤"
+printf "│  VMess         : %-24s│\n" "$VMESS_COUNT"
+printf "│  VLess (BETA)  : %-24s│\n" "$VLESS_COUNT"
+printf "│  Trojan (BETA) : %-24s│\n" "$TROJAN_COUNT"
+echo -e "└────────────────────────────────────────────┘"
+echo ""
+
+# ==========================
+# MENU
+# ==========================
+echo "                  MAIN MENU                 "
+echo "--------------------------------------------"
+echo "  1. Create Vmess"
+echo "  2. Delete Vmess"
+echo "  3. Renew Vmess"
+echo "  4. Check Vmess"
+echo "  5. Check User Vmess"
+echo ""
+echo "  6. Create Vless (BETA)"
+echo "  7. Delete Vless (BETA)"
+echo "  8. Renew Vless (BETA)"
+echo "  9. Check Vless (BETA)"
+echo " 10. Check User Vless (BETA)"
+echo ""
+echo " 11. Create Trojan (BETA)"
+echo " 12. Delete Trojan (BETA)"
+echo " 13. Renew Trojan (BETA)"
+echo " 14. Check Trojan (BETA)"
+echo " 15. Check User Trojan (BETA)"
+echo ""
+echo "  0. Exit"
+echo "--------------------------------------------"
+read -p "Select an option [0 - 15]: " menu
+
+# kalau lisensi expired, blokir semua kecuali exit
+if [[ $days -eq 0 ]]; then
+    case $menu in
+        0) exit 0 ;;
+        *) echo "License expired for ID: $LICENSE_ID"; exit 1 ;;
+    esac
+fi
+
+case $menu in
+    1) add-vmess ;;
+    2) del-vmess ;;
+    3) renew-vmess ;;
+    4) cek-vmess ;;
+    5) user-vmess ;;
+    6) add-vless ;;
+    7) del-vless ;;
+    8) renew-vless ;;
+    9) cek-vless ;;
+    10) user-vless ;;
+    11) add-trojan ;;
+    12) del-trojan ;;
+    13) renew-trojan ;;
+    14) cek-trojan ;;
+    15) user-trojan ;;
+    0) exit 0 ;;
+    *) echo "Invalid option, please try again." ;;
+esac

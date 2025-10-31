@@ -1,0 +1,45 @@
+#!/bin/bash
+
+LOG=/var/log/xray/access.log
+TAIL=400
+
+clear
+echo "-----------------------------------------"
+echo "---------=[ VLESS User Login ]=---------"
+echo "-----------------------------------------"
+
+# pola vless kamu: "Vless #&" → jadi kita cari baris yang diawali #&
+vless_users=( $(grep '^#&' /etc/xray/config.json | awk '{print $2}') )
+
+for u in "${vless_users[@]}"; do
+    [ -z "$u" ] && continue
+
+    lines=$(grep "email: $u" "$LOG" | tail -n "$TAIL")
+    [ -z "$lines" ] && continue
+
+    ips=$(echo "$lines" \
+        | awk '{print $4}' \
+        | sed 's/^tcp://; s/:.*//' \
+        | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
+        | sort -u)
+
+    [ -z "$ips" ] && continue
+
+    echo "user : $u"
+    echo "$ips" | nl
+    echo "-----------------------------------------"
+done
+
+echo "other"
+tail -n "$TAIL" "$LOG" \
+    | grep -v "email:" \
+    | awk '{print $4}' \
+    | sed 's/^tcp://; s/:.*//' \
+    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
+    | sort -u \
+    | nl
+echo "-----------------------------------------"
+echo ""
+read -n 1 -s -r -p "Press any key to exit"
+echo
+exit 0

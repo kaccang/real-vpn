@@ -1,0 +1,15 @@
+[
+  {
+    "username": "troy5",
+    "password": "root123",
+    "domain": "stag-troy5.tembok.xyz",
+    "port_ssh": 2202,
+    "port_dekodemo": 10010,
+    "port_vless": 10011,
+    "port_vmess": 10012,
+    "port_trojan": 10013,
+    "path_dir": "/opt/xray/troy5",
+    "active": true,
+    "bandwidth_quota_gb": 4096
+  }
+]

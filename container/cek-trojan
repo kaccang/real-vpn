@@ -1,0 +1,58 @@
+#!/bin/bash
+
+LOG=/var/log/xray/access.log
+# banyak baris terakhir yang mau dicek (boleh kamu gedein)
+TAIL=400
+
+clear
+echo "-----------------------------------------"
+echo "---------=[ Trojan User Login ]=---------"
+echo "-----------------------------------------"
+
+# ambil daftar user dari config
+users=( $(grep '^#!' /etc/xray/config.json | awk '{print $2}') )
+
+# tampung ip yang nggak ke-map ke user (kalau ada)
+: > /tmp/other.txt
+
+for u in "${users[@]}"; do
+    [ -z "$u" ] && continue
+
+    # ambil baris log terbaru untuk user ini
+    lines=$(grep "email: $u" "$LOG" | tail -n "$TAIL")
+
+    # kalau user ini belum pernah login, lanjut aja
+    [ -z "$lines" ] && continue
+
+    # ambil IP dari kolom 4, buang tcp:, buang port, buang baris non-IP
+    ips=$(echo "$lines" \
+        | awk '{print $4}' \
+        | sed 's/^tcp://; s/:.*//' \
+        | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
+        | sort -u)
+
+    # kalau abis difilter ternyata kosong, lanjut aja
+    [ -z "$ips" ] && continue
+
+    echo "user : $u"
+    echo "$ips" | nl
+    echo "-----------------------------------------"
+done
+
+# optional: tampilkan IP yang muncul di log tapi gak punya email (misal karena direct / dns / versi)
+# ambil tail lalu filter yang ga ada "email:"
+others=$(tail -n "$TAIL" "$LOG" \
+    | grep -v "email:" \
+    | awk '{print $4}' \
+    | sed 's/^tcp://; s/:.*//' \
+    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
+    | sort -u)
+
+echo "other"
+if [ -n "$others" ]; then
+    echo "$others" | nl
+fi
+echo "-----------------------------------------"
+echo ""
+read -n 1 -s -r -p "Press any key to back on menu"
+menu

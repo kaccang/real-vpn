@@ -1,0 +1,83 @@
+#!/bin/bash
+
+# hapus user expired dulu
+xp
+
+# random delay dikit biar gak tabrakan
+sleep $((RANDOM % 20))
+
+# ===== path & var =====
+XRAY_DIR="/etc/xray"
+VNSTAT_DB_SRC="/var/lib/vnstat/vnstat.db"
+VNSTAT_DB_DST="$XRAY_DIR/vnstat.db"
+TOKEN_FILE="/etc/.token"
+date=$(date +"%Y-%m-%d")
+timestamp=$(date +"%H%M%S")
+domain=$(cat "$XRAY_DIR/domain" 2>/dev/null || echo "unknown-domain")
+IP=$(wget -qO- ipv4.icanhazip.com || hostname -I | awk '{print $1}')
+backup_file="$domain-$IP-$date-$timestamp.zip"
+ENABLE_0X0="${ENABLE_0X0:-false}"
+RCLONE_FILENAME="${RCLONE_FILENAME:-}"
+
+# ===== clear log =====
+: > /var/log/xray/access.log
+: > /var/log/xray/error.log
+
+# ===== backup vnstat =====
+echo "Backing up vnstat.db ..."
+rm -f "$VNSTAT_DB_DST"
+if [ -f "$VNSTAT_DB_SRC" ]; then
+  cp "$VNSTAT_DB_SRC" "$VNSTAT_DB_DST"
+else
+  echo "WARNING: $VNSTAT_DB_SRC not found."
+fi
+
+# ===== pack =====
+cd "$XRAY_DIR" || exit 1
+zip -r "$backup_file" . >/dev/null 2>&1
+
+# ===== load telegram token =====
+SKIP_TELEGRAM=0
+if [ -f "$TOKEN_FILE" ]; then
+  CHATID=$(grep -E '^CHATID=' "$TOKEN_FILE" | cut -d= -f2- | tr -d '"')
+  KEY=$(grep -E '^KEY=' "$TOKEN_FILE" | cut -d= -f2- | tr -d '"')
+  if [ -n "$CHATID" ] && [ -n "$KEY" ]; then
+    TELEGRAM_API="https://api.telegram.org/bot$KEY/sendDocument"
+  else
+    SKIP_TELEGRAM=1
+  fi
+else
+  SKIP_TELEGRAM=1
+fi
+
+# ===== upload 0x0.st (opsional) =====
+upload="disabled"
+if [ "$ENABLE_0X0" = "true" ]; then
+  upload=$(curl -s -F "file=@$backup_file" https://0x0.st || echo "upload-failed")
+  [ -z "$upload" ] && upload="upload-failed"
+fi
+
+# ===== upload ke rclone (proton) =====
+if [ -n "$RCLONE_FILENAME" ]; then
+  remote_path="proton:/backup/vps/$domain/$RCLONE_FILENAME"
+else
+  remote_path="proton:/backup/vps/$domain/$backup_file"
+fi
+rclone copyto "$backup_file" "$remote_path" >/dev/null 2>&1 || echo "rclone upload failed" >&2
+
+# ===== kirim ke telegram =====
+if [ "$SKIP_TELEGRAM" -eq 0 ]; then
+  curl -s -F chat_id="$CHATID" \
+       -F document=@"$backup_file" \
+       -F caption="Backup VPN
+Domain: $domain
+IP: $IP
+Direct: $upload" \
+       "$TELEGRAM_API" >/dev/null 2>&1 || echo "Telegram send failed" >&2
+fi
+
+# ===== bersihin =====
+rm -f "$backup_file"
+
+echo "Backup done."
+[ "$upload" != "disabled" ] && echo "Direct link: $upload"

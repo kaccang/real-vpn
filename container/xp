@@ -1,0 +1,99 @@
+#!/bin/bash
+# auto-remove-expired xray (vmess ###, vless #&, trojan #!) untuk DALAM CONTAINER
+
+CONFIG="/etc/xray/config.json"
+TODAY=$(date +"%Y-%m-%d")
+
+# fungsi restart xray di container
+restart_xray() {
+    if command -v supervisorctl >/dev/null 2>&1; then
+        supervisorctl restart xray >/dev/null 2>&1
+    else
+        pkill -x xray >/dev/null 2>&1
+    fi
+}
+
+# ========= VMESS (###) =========
+vmess_users=($(grep -E '^### ' "$CONFIG" | awk '{print $2}' | sort -u))
+for user in "${vmess_users[@]}"; do
+    exp=$(grep -w "^### $user" "$CONFIG" | awk '{print $3}' | sort -u | head -n1)
+
+    # kalau exp kosong atau 0 -> skip
+    if [[ -z "$exp" || "$exp" == "0" ]]; then
+        continue
+    fi
+
+    d1=$(date -d "$exp" +%s 2>/dev/null || echo 0)
+    d2=$(date -d "$TODAY" +%s 2>/dev/null || echo 0)
+
+    # kalau gak bisa parse tanggal -> skip
+    if [[ "$d1" == "0" || "$d2" == "0" ]]; then
+        continue
+    fi
+
+    diff_days=$(((d1 - d2)/86400))
+
+    # hapus HANYA kalau sudah lewat (negatif)
+    if [[ $diff_days -lt 0 ]]; then
+        # pola lama kamu dipertahankan
+        sed -i "/^### $user $exp/,/^},{/d" "$CONFIG"
+        sed -i "/^### $user $exp/,/^},{/d" "$CONFIG"
+        echo "hapus vmess: $user (expired $exp)"
+    fi
+done
+
+# ========= VLESS (#&) =========
+vless_users=($(grep -E '^#& ' "$CONFIG" | awk '{print $2}' | sort -u))
+for user in "${vless_users[@]}"; do
+    exp=$(grep -w "^#& $user" "$CONFIG" | awk '{print $3}' | sort -u | head -n1)
+
+    if [[ -z "$exp" || "$exp" == "0" ]]; then
+        continue
+    fi
+
+    d1=$(date -d "$exp" +%s 2>/dev/null || echo 0)
+    d2=$(date -d "$TODAY" +%s 2>/dev/null || echo 0)
+    if [[ "$d1" == "0" || "$d2" == "0" ]]; then
+        continue
+    fi
+
+    diff_days=$(((d1 - d2)/86400))
+
+    if [[ $diff_days -lt 0 ]]; then
+        sed -i "/^#& $user $exp/,/^},{/d" "$CONFIG"
+        sed -i "/^#& $user $exp/,/^},{/d" "$CONFIG"
+        echo "hapus vless: $user (expired $exp)"
+    fi
+done
+
+# ========= TROJAN (#!) =========
+trojan_users=($(grep -E '^#! ' "$CONFIG" | awk '{print $2}' | sort -u))
+for user in "${trojan_users[@]}"; do
+    exp=$(grep -w "^#! $user" "$CONFIG" | awk '{print $3}' | sort -u | head -n1)
+
+    if [[ -z "$exp" || "$exp" == "0" ]]; then
+        continue
+    fi
+
+    d1=$(date -d "$exp" +%s 2>/dev/null || echo 0)
+    d2=$(date -d "$TODAY" +%s 2>/dev/null || echo 0)
+    if [[ "$d1" == "0" || "$d2" == "0" ]]; then
+        continue
+    fi
+
+    diff_days=$(((d1 - d2)/86400))
+
+    if [[ $diff_days -lt 0 ]]; then
+        sed -i "/^#! $user $exp/,/^},{/d" "$CONFIG"
+        sed -i "/^#! $user $exp/,/^},{/d" "$CONFIG"
+        echo "hapus trojan: $user (expired $exp)"
+    fi
+done
+
+# 👉 bagian SS (###&) kamu bilang ABAIKAN, jadi gak ditulis di sini
+
+# restart xray via supervisor
+restart_xray
+
+clear
+echo "Auto remove expired done."

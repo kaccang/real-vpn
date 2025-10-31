@@ -1,0 +1,207 @@
+{
+  "log": {
+    "loglevel": "warning",
+    "error": "/var/log/xray/error.log",
+    "access": "/var/log/xray/access.log"
+   },
+   "api": {
+    "services": [
+      "HandlerService",
+      "LoggerService",
+      "StatsService"
+     ],
+    "tag": "api"
+    },
+    "stats": {},
+    "policy": {
+    "levels": {
+      "0": {
+        "handshake": 2,
+        "connIdle": 128,
+        "statsUserUplink": true,
+        "statsUserDownlink": true
+        }
+       }
+      },
+      "inbounds": [
+      {
+      "listen": "127.0.0.1",
+      "port": 10020,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1"
+      },
+      "tag": "api"
+      },
+      {
+     "listen": "127.0.0.1",
+     "port": 10021,
+     "protocol": "vless",
+      "settings": {
+          "decryption":"none",
+            "clients": [
+               {
+                 "id": "1d1c1d94-6987-4658-a4dc-8821a30fe7e0"
+#vless
+#& testvless 2025-11-02
+},{"id": "0ee3c8ec-e76b-45e7-b721-a6dfbb5435ac","alterId": 0,"email": "testvless"
+             }
+          ]
+       },
+       "streamSettings":{
+         "network": "ws",
+            "wsSettings": {
+                "path": "/vless"
+          }
+        }
+     },
+     {
+     "listen": "127.0.0.1",
+     "port": 10022,
+     "protocol": "vmess",
+      "settings": {
+            "clients": [
+               {
+                 "id": "1d1c1d94-6987-4658-a4dc-8821a30fe7e0",
+                 "alterId": 0
+#vmess
+### testvmess 2025-11-01
+},{"id": "8349249d-5ff1-42f1-9e15-77fb4e609153","alterId": 0,"email": "testvmess"
+             }
+          ]
+       },
+       "streamSettings":{
+         "network": "ws",
+            "wsSettings": {
+                "path": "/vmess"
+           }
+         }
+       },
+       {
+      "listen": "127.0.0.1",
+      "port": 10023,
+      "protocol": "trojan",
+      "settings": {
+          "decryption":"none",
+           "clients": [
+              {
+                 "password": "1d1c1d94-6987-4658-a4dc-8821a30fe7e0"
+#trojanws
+#! testtrojan 2025-11-01
+},{"password": "50a95b46-8c40-4d50-96c3-50775bdccf21","email": "testtrojan"
+              }
+          ],
+         "udp": true
+       },
+       "streamSettings":{
+           "network": "ws",
+           "wsSettings": {
+               "path": "/trojan"
+            }
+       }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "wireguard",
+      "settings": {
+        "secretKey": "UIt+0FewgPA17XoarJ8gbHMUNBt1aOPxqo5LjS47t14=",
+        "address": [
+          "172.16.0.2/32",
+          "fd01:5ca1:ab1e:815a:634d:1529:f7a0:8f32/128"
+        ],
+        "peers": [
+          {
+            "publicKey": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+            "allowedIPs": [
+              "0.0.0.0/0",
+              "::/0"
+            ],
+            "endpoint": "engage.cloudflareclient.com:2408"
+          }
+        ],
+        "dns": [
+          "1.1.1.1",
+          "1.0.0.1"
+        ],
+        "mtu": 1280,
+        "domainStrategy": "ForceIPv4v6"
+      },
+      "tag": "WARP"
+    },
+    {
+      "protocol": "freedom",
+      "settings": {
+        "domainStrategy": "UseIP"
+      },
+      "tag": "direct"
+    },
+    {
+      "protocol": "blackhole",
+      "settings": {},
+      "tag": "blocked"
+    }
+  ],
+  "routing": {
+  "domainStrategy": "ipIfNotMatch",
+  "rules": [
+    {
+      "type": "field",
+      "inboundTag": ["api"],
+      "outboundTag": "api"
+    },
+    {
+      "type": "field",
+      "domain": [
+        "geosite:5ch",
+        "geosite:3dm"
+      ],
+      "outboundTag": "WARP"
+    },
+    {
+      "type": "field",
+      "domain": [
+        "geosite:ok",
+        "geosite:mpv"
+      ],
+      "network": "udp",
+      "port": "443",
+      "outboundTag": "blocked"
+    },
+    {
+      "type": "field",
+      "outboundTag": "direct",
+      "network": "tcp,udp"
+      }
+    ]
+  },
+  "stats": {},
+  "api": {
+    "services": [
+      "StatsService"
+    ],
+    "tag": "api"
+  },
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserDownlink": true,
+        "statsUserUplink": true
+      }
+    },
+    "system": {
+      "statsInboundUplink": true,
+      "statsInboundDownlink": true,
+      "statsOutboundUplink" : true,
+      "statsOutboundDownlink" : true
+     }
+    },
+    "dns": {
+  "servers": [
+    "https://1.1.1.1/dns-query",
+    "https://dns.google/dns-query",
+    "8.8.8.8",
+    "1.1.1.1"
+  ]
+ }
+}

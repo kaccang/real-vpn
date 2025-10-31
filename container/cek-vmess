@@ -1,0 +1,53 @@
+#!/bin/bash
+
+LOG=/var/log/xray/access.log
+TAIL=400   # banyak baris log terakhir yang mau dicek
+
+clear
+echo "-----------------------------------------"
+echo "---------=[ VMESS User Login ]=---------"
+echo "-----------------------------------------"
+
+# ambil daftar user vmess dari config
+# pola vmess kamu: "Vmess ###" → biasanya di file ditulis "### uservmess"
+vmess_users=( $(grep '^###' /etc/xray/config.json | awk '{print $2}') )
+
+: > /tmp/vmess-other.txt
+
+for u in "${vmess_users[@]}"; do
+    [ -z "$u" ] && continue
+
+    # ambil baris log yang mengandung email user ini
+    lines=$(grep "email: $u" "$LOG" | tail -n "$TAIL")
+    [ -z "$lines" ] && continue
+
+    # ambil IP dari kolom 4, buang tcp:, buang port, buang non-IP
+    ips=$(echo "$lines" \
+        | awk '{print $4}' \
+        | sed 's/^tcp://; s/:.*//' \
+        | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
+        | sort -u)
+
+    [ -z "$ips" ] && continue
+
+    echo "user : $u"
+    echo "$ips" | nl
+    echo "-----------------------------------------"
+done
+
+# other = baris yang bukan punya email (dns / direct / versi)
+others=$(tail -n "$TAIL" "$LOG" \
+    | grep -v "email:" \
+    | awk '{print $4}' \
+    | sed 's/^tcp://; s/:.*//' \
+    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
+    | sort -u)
+
+echo "other"
+if [ -n "$others" ]; then
+    echo "$others" | nl
+fi
+echo "-----------------------------------------"
+echo ""
+read -n 1 -s -r -p "Press any key to exit"
+menu 
