@@ -26,16 +26,19 @@ apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-co
 apt install wget curl zip vnstat socat gzip neofetch htop nginx -y 
 docker --version
 
+sudo -v ; curl https://rclone.org/install.sh | sudo bash
 #
 mkdir -p /opt/xray
 
 chmod +x /opt/xray/menu.sh
 chmod +x /opt/xray/cert.sh
 chmod +x /opt/xray/issue-ssl.sh
+chmod +x /opt/xray/backup-restore.sh
 
 cp /opt/xray/menu.sh /usr/bin/
 cp /opt/xray/cert.sh /usr/bin/
 cp /opt/xray/issue-ssl.sh /usr/bin/
+cp /opt/xray/backup-restore.sh /usr/bin/
 
 if ! grep -q "/usr/bin/menu" ~/.bashrc; then
     echo "/usr/bin/menu" >> ~/.bashrc

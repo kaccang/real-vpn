@@ -10,12 +10,9 @@ NGINX_CONF_DIR="/etc/nginx/conf.d"
 # base dir
 mkdir -p "$BASE_DIR"
 
-# ====== ensure rclone token file ======
-# biar script lain gak error
+# ====== ensure token & rclone.conf (nama konsisten) ======
 [ -f "$BASE_DIR/.token" ] || touch "$BASE_DIR/.token"
-# dua-duanya kita siapin aja
-[ -f "$BASE_DIR/.rclone.conf" ]   || touch "$BASE_DIR/.rclone.conf"
-[ -f "$BASE_DIR/.rclone.config" ] || touch "$BASE_DIR/.rclone.config"
+[ -f "$BASE_DIR/rclone.conf" ] || touch "$BASE_DIR/rclone.conf"
 
 # ==============================
 # helper kecil
@@ -323,7 +320,11 @@ while true; do
       read -rp "Password SSH root [default: root123]: " ROOTPW
       [ -z "$ROOTPW" ] && ROOTPW="root123"
 
-      mkdir -p "$BASE_DIR/$NAME/log"
+      # siapkan direktori volume persisten
+      mkdir -p "$BASE_DIR/$NAME/log" \
+               "$BASE_DIR/$NAME/etc-xray" \
+               "$BASE_DIR/$NAME/vnstat" \
+               "$BASE_DIR/$NAME/ssh"
 
       echo
       echo "== RINGKASAN =="
@@ -340,7 +341,7 @@ while true; do
       read -rp "Lanjut jalankan container? [Y/n]: " GO
       GO=${GO:-Y}
       if [[ "$GO" =~ ^[Yy]$ ]]; then
-        # simpan port yg dipakai SEKARANG buat ditampilin belakangan
+        # simpan port ssh yang dipakai saat ini (untuk ditampilkan)
         CURRENT_SSH="$SSH"
 
         docker rm -f "xray-$NAME" >/dev/null 2>&1 || true
@@ -358,6 +359,9 @@ while true; do
           -e SSH_PORT="$CURRENT_SSH" \
           -e ROOT_PASSWORD="$ROOTPW" \
           -v "$BASE_DIR/$NAME/log:/var/log/xray" \
+          -v "$BASE_DIR/$NAME/etc-xray:/etc/xray" \
+          -v "$BASE_DIR/$NAME/vnstat:/var/lib/vnstat" \
+          -v "$BASE_DIR/$NAME/ssh:/root/.ssh" \
           "$IMAGE_NAME"
 
         save_profile_json "$NAME" "$DOMAIN" "$ROOTPW" "$CURRENT_SSH" "$DOKO" "$VLESS" "$VMESS" "$TROJAN"
@@ -375,7 +379,7 @@ while true; do
           fi
         fi
 
-        # naikin port BARU SESUDAH ditampilin
+        # naikkan port baru SETELAH jalan, supaya yang ditampilkan tetap CURRENT_SSH
         DOKO=$((DOKO+STEP))
         SSH=$((SSH+1))
         save_state

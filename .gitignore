@@ -49,11 +49,18 @@ log/
 *.der
 
 # yang kamu bilang sendiri:
+profiles.json
+.ports
+.rclone.config
+.rclone.conf
+/root/.config/rclone/rclone.conf
 .env
+.git
 .token
 /.token
 /opt/xray/.token
 /opt/xray/*.token
+/opt/xray/.rclone.conf
 
 # rclone config
 rclone.conf
@@ -83,3 +90,7 @@ __pycache__/
 
 # ===== backup hasil cron di container =====
 /opt/xray/*/backup/**
+
+# backup & artefak lokal
+backups/
+backup.MANIFEST.*.txt

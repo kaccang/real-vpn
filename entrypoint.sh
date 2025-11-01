@@ -83,7 +83,9 @@ fi
 set -e
 
 # ====== Xray config (PAKE PUNYAMU, komentar dibiarkan) ======
-cat >/etc/xray/config.json <<EOF
+# HANYA ditulis jika belum ada, supaya tidak overwrite file yang sudah ada/di-mount
+if [ ! -s /etc/xray/config.json ]; then
+cat >/etc/xray/config.json <<'EOF'
 {
   "log": {
     "loglevel": "warning",
@@ -224,6 +226,7 @@ cat >/etc/xray/config.json <<EOF
   }
 }
 EOF
+fi
 
 # ====== supervisor ======
 cat >/etc/supervisor/supervisord.conf <<EOF
