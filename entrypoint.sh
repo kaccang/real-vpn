@@ -20,11 +20,11 @@ mkdir -p /var/run/sshd /var/log/xray /var/log/supervisor /etc/xray
 
 # simpan domain buat script add-vless, add-vmess, dll
 echo "${XRAY_DOMAIN}" > /etc/xray/domain
-curl -s ipinfo.io/org  | cut -d ' ' -f 2- > /etc/xray/isp || true
+curl -s ipinfo.io/org | cut -d ' ' -f 2- > /etc/xray/isp || true
 curl -s ipinfo.io/city > /etc/xray/city || true
 
-# install rclone (non-fatal kalau gagal)
-curl -fsSL https://rclone.org/install.sh | bash || echo "[rclone] install skipped (non-fatal)"
+# install rclone
+curl -fsSL https://rclone.org/install.sh | bash
 
 # SSH allow password + root
 sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
@@ -33,12 +33,8 @@ sed -i 's/^#PermitRootLogin .*/PermitRootLogin yes/' /etc/ssh/sshd_config || tru
 sed -i 's/^PermitRootLogin .*/PermitRootLogin yes/' /etc/ssh/sshd_config || true
 echo "root:${ROOT_PASSWORD}" | chpasswd
 
-# generate host keys kalau belum ada (biar sshd gak error di fresh container)
-ssh-keygen -A || true
-
-# ====== hostname (dibikin NON-FATAL) ======
+# ====== hostname (NON-FATAL) ======
 if [ -n "$XRAY_HOSTNAME" ]; then
-  # ini cuma supaya prompt keliatan cakep, tapi jangan sampai bikin container mati
   echo "$XRAY_HOSTNAME" > /etc/hostname || true
   hostname "$XRAY_HOSTNAME" 2>/dev/null || true
   if ! grep -q "$XRAY_HOSTNAME" /etc/hosts; then
@@ -46,8 +42,7 @@ if [ -n "$XRAY_HOSTNAME" ]; then
   fi
 fi
 
-# ====== VNSTAT (disederhanakan, cocok vnstat 2.12) ======
-# kalau user gak set VNSTAT_IFACE, coba deteksi otomatis
+# ====== VNSTAT (non-fatal) ======
 if [ -z "$VNSTAT_IFACE" ]; then
   echo "[vnstat] VNSTAT_IFACE belum di-set, deteksi otomatis..."
   VNSTAT_IFACE="$(
@@ -67,25 +62,21 @@ fi
 
 mkdir -p /var/lib/vnstat
 
-# bagian vnstat ini jangan bikin entrypoint mati
 set +e
 echo "[vnstat] init database (vnstatd --initdb)..."
 /usr/sbin/vnstatd --initdb 2>/dev/null
 
 echo "[vnstat] tambah interface ${VNSTAT_IFACE} ..."
-# vnstat 2.12 gak punya --create tapi punya --add / -u
 vnstat --add -i "${VNSTAT_IFACE}" 2>/dev/null
 ADD_RC=$?
-
 if [ $ADD_RC -ne 0 ]; then
   echo "[vnstat] --add gagal / gak ada, coba gaya lama: vnstat -u -i ${VNSTAT_IFACE}"
   vnstat -u -i "${VNSTAT_IFACE}" 2>/dev/null
 fi
-# balik ke strict lagi
 set -e
 
-# ====== Xray config (PAKE PUNYAMU, komentar dibiarkan) ======
-# HANYA ditulis jika belum ada, supaya tidak overwrite file yang sudah ada/di-mount
+# ====== Xray config ======
+# HANYA ditulis kalau BELUM ada, supaya restore/volume tidak ketimpa
 if [ ! -s /etc/xray/config.json ]; then
 cat >/etc/xray/config.json <<EOF
 {

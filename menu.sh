@@ -98,53 +98,78 @@ write_nginx_block() {
   local tmp
   tmp="$(mktemp)"
 
-  cat > "$tmp" <<EOF
-# auto-generated for ${name}
+  # pakai placeholder lalu sed supaya $host dkk gak di-expand shell
+  cat > "$tmp" <<'EOS'
+# auto-generated for NAME_REPLACE
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name ${domain};
+    server_name DOMAIN_REPLACE;
 
-    ssl_certificate     /opt/xray/${name}/xray.crt;
-    ssl_certificate_key /opt/xray/${name}/xray.key;
+    ssl_certificate     CERTPATH_REPLACE.crt;
+    ssl_certificate_key CERTPATH_REPLACE.key;
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers 'TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:ECDHE+AESGCM:ECDHE+CHACHA20';
     ssl_prefer_server_ciphers off;
 
-    location ^~ /vless {
+    # ======= VMESS: terima /vmess dan semua subpath =======
+    location ~ ^/vmess(?=/|$) {
+        # Kalau bukan websocket, ubah ke path base
+        if ($http_upgrade !~* "websocket") {
+            rewrite ^/vmess/.*$ /vmess break;
+        }
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_redirect off;
         proxy_buffering off;
-        proxy_pass http://127.0.0.1:${vless};
+        proxy_pass http://127.0.0.1:VMESS_PORT_REPLACE;
     }
 
-    location ^~ /vmess {
+    # ======= VLESS =======
+    location ~ ^/vless(?=/|$) {
+        if ($http_upgrade !~* "websocket") {
+            rewrite ^/vless/.*$ /vless break;
+        }
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_redirect off;
         proxy_buffering off;
-        proxy_pass http://127.0.0.1:${vmess};
+        proxy_pass http://127.0.0.1:VLESS_PORT_REPLACE;
     }
 
-    location ^~ /trojan {
+    # ======= TROJAN =======
+    location ~ ^/trojan(?=/|$) {
+        if ($http_upgrade !~* "websocket") {
+            rewrite ^/trojan/.*$ /trojan break;
+        }
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_redirect off;
         proxy_buffering off;
-        proxy_pass http://127.0.0.1:${trojan};
+        proxy_pass http://127.0.0.1:TROJAN_PORT_REPLACE;
     }
 }
-EOF
+EOS
+
+  sed -i \
+    -e "s|NAME_REPLACE|${name}|g" \
+    -e "s|DOMAIN_REPLACE|${domain}|g" \
+    -e "s|CERTPATH_REPLACE|/opt/xray/${name}/xray|g" \
+    -e "s|VMESS_PORT_REPLACE|${vmess}|g" \
+    -e "s|VLESS_PORT_REPLACE|${vless}|g" \
+    -e "s|TROJAN_PORT_REPLACE|${trojan}|g" \
+    "$tmp"
 
   if nginx -t >/dev/null 2>&1; then
     mv "$tmp" "$target"
@@ -221,7 +246,7 @@ issue_ssl_for_user() {
 }
 
 # ==============================
-# simpan profile ke JSON
+# simpan / hapus profile ke JSON
 # ==============================
 save_profile_json() {
   local name="$1" domain="$2" pass="$3" ssh="$4" doko="$5" vless="$6" vmess="$7" trojan="$8"
@@ -320,7 +345,7 @@ while true; do
       read -rp "Password SSH root [default: root123]: " ROOTPW
       [ -z "$ROOTPW" ] && ROOTPW="root123"
 
-      # siapkan direktori volume persisten
+      # volume persisten (biar restore/backup aman)
       mkdir -p "$BASE_DIR/$NAME/log" \
                "$BASE_DIR/$NAME/etc-xray" \
                "$BASE_DIR/$NAME/vnstat" \
@@ -341,7 +366,6 @@ while true; do
       read -rp "Lanjut jalankan container? [Y/n]: " GO
       GO=${GO:-Y}
       if [[ "$GO" =~ ^[Yy]$ ]]; then
-        # simpan port ssh yang dipakai saat ini (untuk ditampilkan)
         CURRENT_SSH="$SSH"
 
         docker rm -f "xray-$NAME" >/dev/null 2>&1 || true
@@ -378,13 +402,13 @@ while true; do
             echo "⚠️ SSL belum dibuat. Jalankan menu 4 nanti."
           fi
 
-          # >>> Tambahan: kalau cert SUDAH ada (misal hasil restore), tulis nginx sekarang juga
+          # kalau cert SUDAH ada (hasil restore), tulis nginx sekarang juga
           if [ -f "/opt/xray/$NAME/xray.crt" ] && [ -f "/opt/xray/$NAME/xray.key" ]; then
             write_nginx_block "$NAME" "$DOMAIN" "$VLESS" "$VMESS" "$TROJAN"
           fi
         fi
 
-        # naikkan port baru SETELAH jalan, supaya yang ditampilkan tetap CURRENT_SSH
+        # naikin counter setelah create
         DOKO=$((DOKO+STEP))
         SSH=$((SSH+1))
         save_state
