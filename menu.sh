@@ -39,7 +39,7 @@ load_state() {
     . "$STATE_FILE"
   else
     DOKO=10000
-    SSH=2201
+    SSH=2200
   fi
 }
 
@@ -80,6 +80,7 @@ write_nginx_block() {
 
   ensure_nginx
 
+  # hanya tulis kalau cert ada (restore / sudah issue)
   if [ ! -f "/opt/xray/${name}/xray.crt" ] || [ ! -f "/opt/xray/${name}/xray.key" ]; then
     echo "⚠️ cert untuk ${name} belum ada, skip tulis nginx."
     return 0
@@ -89,71 +90,81 @@ write_nginx_block() {
   local target="$NGINX_CONF_DIR/xray-${name}.conf"
   local tmp; tmp="$(mktemp)"
 
-  cat > "$tmp" <<EOF
-# auto-generated for ${name}
+  cat > "$tmp" <<'EOSERVER'
+# auto-generated for __NAME__
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name ${domain};
+    server_name __DOMAIN__;
 
-    ssl_certificate     /opt/xray/${name}/xray.crt;
-    ssl_certificate_key /opt/xray/${name}/xray.key;
+    ssl_certificate     __CERT_CRT__;
+    ssl_certificate_key __CERT_KEY__;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers 'TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:ECDHE+AESGCM:ECDHE+CHACHA20';
     ssl_prefer_server_ciphers off;
 
-    # ==== VLESS: /vless dan turunannya ====
-    location ~ ^/vless(?:/.*)?$ {
-        # kalau bukan websocket, rewrite ke /vless
-        if (\$http_upgrade != "websocket") {
-            rewrite ^/vless(?:/.*)?$ /vless break;
+    # ==== VLESS: /vless dan turunannya (multi-path) ====
+    location ~ /vless {
+        if ($http_upgrade != "Websocket") {
+            rewrite /(.*) /vless break;
         }
+        proxy_redirect off;
+        proxy_pass http://127.0.0.1:__PORT_VLESS__;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_buffering off;
-        proxy_pass http://127.0.0.1:${vless};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
-    # ==== VMESS: /vmess dan turunannya ====
-    location ~ ^/vmess(?:/.*)?$ {
-        if (\$http_upgrade != "websocket") {
-            rewrite ^/vmess(?:/.*)?$ /vmess break;
+    # ==== VMESS: /vmess dan turunannya (multi-path) ====
+    location ~ /vmess {
+        if ($http_upgrade != "Websocket") {
+            rewrite /(.*) /vmess break;
         }
+        proxy_redirect off;
+        proxy_pass http://127.0.0.1:__PORT_VMESS__;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_buffering off;
-        proxy_pass http://127.0.0.1:${vmess};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
-    # ==== TROJAN: /trojan dan turunannya ====
-    location ~ ^/trojan(?:/.*)?$ {
-        if (\$http_upgrade != "websocket") {
-            rewrite ^/trojan(?:/.*)?$ /trojan break;
+    # ==== TROJAN: /trojan dan turunannya (multi-path) ====
+    location ~ /trojan {
+        if ($http_upgrade != "Websocket") {
+            rewrite /(.*) /trojan break;
         }
+        proxy_redirect off;
+        proxy_pass http://127.0.0.1:__PORT_TROJAN__;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_buffering off;
-        proxy_pass http://127.0.0.1:${trojan};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 }
-EOF
+EOSERVER
+
+  # substitusi placeholder
+  sed -i \
+    -e "s#__NAME__#${name}#g" \
+    -e "s#__DOMAIN__#${domain}#g" \
+    -e "s#__CERT_CRT__#/opt/xray/${name}/xray.crt#g" \
+    -e "s#__CERT_KEY__#/opt/xray/${name}/xray.key#g" \
+    -e "s#__PORT_VLESS__#${vless}#g" \
+    -e "s#__PORT_VMESS__#${vmess}#g" \
+    -e "s#__PORT_TROJAN__#${trojan}#g" \
+    "$tmp"
 
   if nginx -t >/dev/null 2>&1; then
     mv "$tmp" "$target"
     nginx -t && (systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true)
-    echo "✅ nginx untuk ${name} ditulis."
+    echo "✅ nginx untuk ${name} ditulis (multi-path aktif)."
   else
     echo "❌ nginx.conf error, block ${name} gak ditulis"
     rm -f "$tmp"
@@ -393,7 +404,7 @@ while true; do
       if ! command -v jq >/dev/null 2>&1; then echo "jq gak ada. apt-get install -y jq"; read -rp "enter..."; continue; fi
 
       mapfile -t LINES < <(jq -r '.[] | select(.domain != null and .domain != "") | "\(.username) \(.domain) \(.port_vless) \(.port_vmess) \(.port_trojan)"' "$PROFILE_FILE")
-      if [ ${#LINES[@]} -eq 0 ]; then echo "gak ada profile yang punya domain."; read -rp "enter..."; continue; fi
+      if [ ${#LINES[@]} -eq 0 ] ; then echo "gak ada profile yang punya domain."; read -rp "enter..."; continue; fi
 
       echo "Pilih profile yang mau di-issue SSL:"
       idx=0; declare -A UMAP
