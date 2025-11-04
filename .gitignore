@@ -94,3 +94,9 @@ __pycache__/
 # backup & artefak lokal
 backups/
 backup.MANIFEST.*.txt
+
+# local state
+profiles.json
+backups/
+backup.MANIFEST*.txt
+*.tgz
