@@ -377,6 +377,11 @@ while true; do
           else
             echo "⚠️ SSL belum dibuat. Jalankan menu 4 nanti."
           fi
+
+          # >>> Tambahan: kalau cert SUDAH ada (misal hasil restore), tulis nginx sekarang juga
+          if [ -f "/opt/xray/$NAME/xray.crt" ] && [ -f "/opt/xray/$NAME/xray.key" ]; then
+            write_nginx_block "$NAME" "$DOMAIN" "$VLESS" "$VMESS" "$TROJAN"
+          fi
         fi
 
         # naikkan port baru SETELAH jalan, supaya yang ditampilkan tetap CURRENT_SSH

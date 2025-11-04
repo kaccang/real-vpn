@@ -20,12 +20,11 @@ mkdir -p /var/run/sshd /var/log/xray /var/log/supervisor /etc/xray
 
 # simpan domain buat script add-vless, add-vmess, dll
 echo "${XRAY_DOMAIN}" > /etc/xray/domain
-curl -s ipinfo.io/org | cut -d ' ' -f 2- > /etc/xray/isp
-curl -s ipinfo.io/city > /etc/xray/city
+curl -s ipinfo.io/org  | cut -d ' ' -f 2- > /etc/xray/isp || true
+curl -s ipinfo.io/city > /etc/xray/city || true
 
-# install rclone
-curl -fsSL https://rclone.org/install.sh | bash
-
+# install rclone (non-fatal kalau gagal)
+curl -fsSL https://rclone.org/install.sh | bash || echo "[rclone] install skipped (non-fatal)"
 
 # SSH allow password + root
 sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
@@ -33,6 +32,9 @@ sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_
 sed -i 's/^#PermitRootLogin .*/PermitRootLogin yes/' /etc/ssh/sshd_config || true
 sed -i 's/^PermitRootLogin .*/PermitRootLogin yes/' /etc/ssh/sshd_config || true
 echo "root:${ROOT_PASSWORD}" | chpasswd
+
+# generate host keys kalau belum ada (biar sshd gak error di fresh container)
+ssh-keygen -A || true
 
 # ====== hostname (dibikin NON-FATAL) ======
 if [ -n "$XRAY_HOSTNAME" ]; then
@@ -85,7 +87,7 @@ set -e
 # ====== Xray config (PAKE PUNYAMU, komentar dibiarkan) ======
 # HANYA ditulis jika belum ada, supaya tidak overwrite file yang sudah ada/di-mount
 if [ ! -s /etc/xray/config.json ]; then
-cat >/etc/xray/config.json <<'EOF'
+cat >/etc/xray/config.json <<EOF
 {
   "log": {
     "loglevel": "warning",
