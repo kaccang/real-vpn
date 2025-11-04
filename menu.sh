@@ -17,25 +17,17 @@ mkdir -p "$BASE_DIR"
 # ==============================
 # helper kecil
 # ==============================
-json_escape() {
-  echo "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
-}
+json_escape() { echo "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 
 get_acme_bin() {
-  if command -v acme.sh >/dev/null 2>&1; then
-    echo "acme.sh"; return
-  fi
-  if [ -x "/root/.acme.sh/acme.sh" ]; then
-    echo "/root/.acme.sh/acme.sh"; return
-  fi
+  if command -v acme.sh >/dev/null 2>&1; then echo "acme.sh"; return; fi
+  if [ -x "/root/.acme.sh/acme.sh" ]; then echo "/root/.acme.sh/acme.sh"; return; fi
   echo ""
 }
 
 get_public_ip() {
   ip="$(curl -4 -s https://icanhazip.com 2>/dev/null | tr -d '[:space:]')"
-  if [ -z "$ip" ]; then
-    ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  fi
+  if [ -z "$ip" ]; then ip="$(hostname -I 2>/dev/null | awk '{print $1}')"; fi
   echo "$ip"
 }
 
@@ -95,81 +87,68 @@ write_nginx_block() {
 
   mkdir -p "$NGINX_CONF_DIR"
   local target="$NGINX_CONF_DIR/xray-${name}.conf"
-  local tmp
-  tmp="$(mktemp)"
+  local tmp; tmp="$(mktemp)"
 
-  # pakai placeholder lalu sed supaya $host dkk gak di-expand shell
-  cat > "$tmp" <<'EOS'
-# auto-generated for NAME_REPLACE
+  cat > "$tmp" <<EOF
+# auto-generated for ${name}
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name DOMAIN_REPLACE;
+    server_name ${domain};
 
-    ssl_certificate     CERTPATH_REPLACE.crt;
-    ssl_certificate_key CERTPATH_REPLACE.key;
+    ssl_certificate     /opt/xray/${name}/xray.crt;
+    ssl_certificate_key /opt/xray/${name}/xray.key;
     ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers 'TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:ECDHE+AESGCM:ECDHE+CHACHA20';
     ssl_prefer_server_ciphers off;
 
-    # ======= VMESS: terima /vmess dan semua subpath =======
-    location ~ ^/vmess(?=/|$) {
-        # Kalau bukan websocket, ubah ke path base
-        if ($http_upgrade !~* "websocket") {
-            rewrite ^/vmess/.*$ /vmess break;
+    # ==== VLESS: /vless dan turunannya ====
+    location ~ ^/vless(?:/.*)?$ {
+        # kalau bukan websocket, rewrite ke /vless
+        if (\$http_upgrade != "websocket") {
+            rewrite ^/vless(?:/.*)?$ /vless break;
         }
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_redirect off;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_buffering off;
-        proxy_pass http://127.0.0.1:VMESS_PORT_REPLACE;
+        proxy_pass http://127.0.0.1:${vless};
     }
 
-    # ======= VLESS =======
-    location ~ ^/vless(?=/|$) {
-        if ($http_upgrade !~* "websocket") {
-            rewrite ^/vless/.*$ /vless break;
+    # ==== VMESS: /vmess dan turunannya ====
+    location ~ ^/vmess(?:/.*)?$ {
+        if (\$http_upgrade != "websocket") {
+            rewrite ^/vmess(?:/.*)?$ /vmess break;
         }
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_redirect off;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_buffering off;
-        proxy_pass http://127.0.0.1:VLESS_PORT_REPLACE;
+        proxy_pass http://127.0.0.1:${vmess};
     }
 
-    # ======= TROJAN =======
-    location ~ ^/trojan(?=/|$) {
-        if ($http_upgrade !~* "websocket") {
-            rewrite ^/trojan/.*$ /trojan break;
+    # ==== TROJAN: /trojan dan turunannya ====
+    location ~ ^/trojan(?:/.*)?$ {
+        if (\$http_upgrade != "websocket") {
+            rewrite ^/trojan(?:/.*)?$ /trojan break;
         }
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_redirect off;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_buffering off;
-        proxy_pass http://127.0.0.1:TROJAN_PORT_REPLACE;
+        proxy_pass http://127.0.0.1:${trojan};
     }
 }
-EOS
-
-  sed -i \
-    -e "s|NAME_REPLACE|${name}|g" \
-    -e "s|DOMAIN_REPLACE|${domain}|g" \
-    -e "s|CERTPATH_REPLACE|/opt/xray/${name}/xray|g" \
-    -e "s|VMESS_PORT_REPLACE|${vmess}|g" \
-    -e "s|VLESS_PORT_REPLACE|${vless}|g" \
-    -e "s|TROJAN_PORT_REPLACE|${trojan}|g" \
-    "$tmp"
+EOF
 
   if nginx -t >/dev/null 2>&1; then
     mv "$tmp" "$target"
@@ -185,84 +164,56 @@ EOS
 # pastikan acme
 # ==============================
 ensure_acme() {
-  local bin
-  bin="$(get_acme_bin)"
-  if [ -n "$bin" ]; then
-    . ~/.acme.sh/acme.sh.env 2>/dev/null || true
-    return
-  fi
-
+  local bin; bin="$(get_acme_bin)"
+  if [ -n "$bin" ]; then . ~/.acme.sh/acme.sh.env 2>/dev/null || true; return; fi
   echo "⚠️ acme.sh belum ada, install dulu..."
   apt-get update -y && apt-get install -y curl socat
   curl https://get.acme.sh | sh -s email=admin@localhost
   . ~/.acme.sh/acme.sh.env 2>/dev/null || true
 }
 
-# ==============================
-# issue ssl 1 user
-# ==============================
 issue_ssl_for_user() {
-  local name="$1"
-  local domain="$2"
+  local name="$1" domain="$2"
+  ensure_acme; ensure_nginx; mkdir -p "/opt/xray/${name}"
+  local ACME_BIN; ACME_BIN="$(get_acme_bin)"
+  if [ -z "$ACME_BIN" ]; then echo "❌ acme.sh gak ketemu"; return 1; fi
 
-  ensure_acme
-  ensure_nginx
-  mkdir -p "/opt/xray/${name}"
-
-  local ACME_BIN
-  ACME_BIN="$(get_acme_bin)"
-  if [ -z "$ACME_BIN" ]; then
-    echo "❌ acme.sh masih gak ketemu padahal udah diinstall. cek /root/.acme.sh/"
-    return 1
-  fi
-
-  echo "[ssl] stop nginx sementara..."
-  systemctl stop nginx 2>/dev/null || true
-
+  echo "[ssl] stop nginx sementara..."; systemctl stop nginx 2>/dev/null || true
   "$ACME_BIN" --set-default-ca --server letsencrypt
 
   if ! "$ACME_BIN" --issue --standalone -d "$domain" --force; then
-    echo "❌ issue cert gagal untuk $domain"
-    systemctl start nginx 2>/dev/null || true
-    return 1
+    echo "❌ issue cert gagal untuk $domain"; systemctl start nginx 2>/dev/null || true; return 1
   fi
 
   if ! "$ACME_BIN" --install-cert -d "$domain" \
-      --key-file "/opt/xray/${name}/xray.key" \
-      --fullchain-file "/opt/xray/${name}/xray.crt"; then
-    echo "❌ install-cert gagal buat $domain"
-    systemctl start nginx 2>/dev/null || true
-    return 1
+        --key-file "/opt/xray/${name}/xray.key" \
+        --fullchain-file "/opt/xray/${name}/xray.crt"; then
+    echo "❌ install-cert gagal buat $domain"; systemctl start nginx 2>/dev/null || true; return 1
   fi
 
   chmod 600 "/opt/xray/${name}/xray.key"
   chmod 644 "/opt/xray/${name}/xray.crt"
   chown root:root "/opt/xray/${name}/xray.key" "/opt/xray/${name}/xray.crt"
 
-  echo "[ssl] start nginx lagi..."
-  nginx -t && (systemctl start nginx 2>/dev/null || systemctl reload nginx 2>/dev/null || true)
-
+  echo "[ssl] start nginx lagi..."; nginx -t && (systemctl start nginx 2>/dev/null || systemctl reload nginx 2>/dev/null || true)
   echo "✅ SSL selesai untuk $domain → /opt/xray/${name}/xray.(key|crt)"
 }
 
 # ==============================
-# simpan / hapus profile ke JSON
+# simpan / hapus profiles.json
 # ==============================
 save_profile_json() {
   local name="$1" domain="$2" pass="$3" ssh="$4" doko="$5" vless="$6" vmess="$7" trojan="$8"
 
   if ! command -v jq >/dev/null 2>&1; then
-    echo "⚠️ jq gak ada, skip simpan JSON"
-    return
+    echo "⚠️ jq gak ada, skip simpan JSON"; return
   fi
 
   [ -f "$PROFILE_FILE" ] || echo "[]" > "$PROFILE_FILE"
-
-  local tmp
-  tmp="$(mktemp)"
-
+  local tmp; tmp="$(mktemp)"
   jq --arg n "$name" '[.[] | select(.username != $n)]' "$PROFILE_FILE" > "$tmp" && mv "$tmp" "$PROFILE_FILE"
 
+  tmp="$(mktemp)"
   jq --arg username "$name" \
      --arg password "$pass" \
      --arg domain "$domain" \
@@ -288,12 +239,9 @@ save_profile_json() {
 
 delete_profile_json() {
   local name="$1"
-  if ! command -v jq >/dev/null 2>&1; then
-    return
-  fi
+  if ! command -v jq >/dev/null 2>&1; then return; fi
   [ -f "$PROFILE_FILE" ] || return
-  local tmp
-  tmp="$(mktemp)"
+  local tmp; tmp="$(mktemp)"
   jq --arg n "$name" '[.[] | select(.username != $n)]' "$PROFILE_FILE" > "$tmp" && mv "$tmp" "$PROFILE_FILE"
 }
 
@@ -332,24 +280,15 @@ while true; do
       echo "  ssh      : $SSH"
       echo
 
-      read -rp "Port dokodemo [$DOKO]: " IN_D
-      [ -n "$IN_D" ] && DOKO="$IN_D"
+      read -rp "Port dokodemo [$DOKO]: " IN_D; [ -n "$IN_D" ] && DOKO="$IN_D"
+      VLESS=$((DOKO+1)); VMESS=$((DOKO+2)); TROJAN=$((DOKO+3))
 
-      VLESS=$((DOKO+1))
-      VMESS=$((DOKO+2))
-      TROJAN=$((DOKO+3))
-
-      read -rp "Port SSH [$SSH]: " IN_S
-      [ -n "$IN_S" ] && SSH="$IN_S"
+      read -rp "Port SSH [$SSH]: " IN_S; [ -n "$IN_S" ] && SSH="$IN_S"
 
       read -rp "Password SSH root [default: root123]: " ROOTPW
       [ -z "$ROOTPW" ] && ROOTPW="root123"
 
-      # volume persisten (biar restore/backup aman)
-      mkdir -p "$BASE_DIR/$NAME/log" \
-               "$BASE_DIR/$NAME/etc-xray" \
-               "$BASE_DIR/$NAME/vnstat" \
-               "$BASE_DIR/$NAME/ssh"
+      mkdir -p "$BASE_DIR/$NAME/log" "$BASE_DIR/$NAME/etc-xray" "$BASE_DIR/$NAME/vnstat" "$BASE_DIR/$NAME/ssh"
 
       echo
       echo "== RINGKASAN =="
@@ -363,11 +302,9 @@ while true; do
       echo "password  : $ROOTPW"
       echo
 
-      read -rp "Lanjut jalankan container? [Y/n]: " GO
-      GO=${GO:-Y}
+      read -rp "Lanjut jalankan container? [Y/n]: " GO; GO=${GO:-Y}
       if [[ "$GO" =~ ^[Yy]$ ]]; then
         CURRENT_SSH="$SSH"
-
         docker rm -f "xray-$NAME" >/dev/null 2>&1 || true
 
         docker run -d \
@@ -401,25 +338,17 @@ while true; do
           else
             echo "⚠️ SSL belum dibuat. Jalankan menu 4 nanti."
           fi
-
-          # kalau cert SUDAH ada (hasil restore), tulis nginx sekarang juga
+          # Jika cert SUDAH ada (misal hasil restore), tulis nginx sekarang juga
           if [ -f "/opt/xray/$NAME/xray.crt" ] && [ -f "/opt/xray/$NAME/xray.key" ]; then
             write_nginx_block "$NAME" "$DOMAIN" "$VLESS" "$VMESS" "$TROJAN"
           fi
         fi
 
-        # naikin counter setelah create
-        DOKO=$((DOKO+STEP))
-        SSH=$((SSH+1))
-        save_state
+        DOKO=$((DOKO+STEP)); SSH=$((SSH+1)); save_state
 
         PUBIP="$(get_public_ip)"
         echo "✅ container xray-$NAME jalan."
-        if [ -n "$PUBIP" ]; then
-          echo "   ssh: ssh root@${PUBIP} -p ${CURRENT_SSH}"
-        else
-          echo "   ssh: ssh root@<server-ip> -p ${CURRENT_SSH}"
-        fi
+        if [ -n "$PUBIP" ]; then echo "   ssh: ssh root@${PUBIP} -p ${CURRENT_SSH}"; else echo "   ssh: ssh root@<server-ip> -p ${CURRENT_SSH}"; fi
       else
         echo "❎ dibatalkan."
       fi
@@ -431,8 +360,7 @@ while true; do
       read -rp "enter..."
     ;;
     3)
-      MAP=()
-      i=0
+      MAP=(); i=0
       while IFS= read -r line; do
         i=$((i+1))
         name="$(echo "$line" | awk '{print $1}')"
@@ -445,48 +373,30 @@ while true; do
       [ $i -eq 0 ] && { echo "(gak ada container)"; read -rp "enter..."; continue; }
 
       read -rp "Hapus nomor / nama: " DEL
-      if [[ "$DEL" =~ ^[0-9]+$ ]]; then
-        DEL="${MAP[$DEL]}"
-      fi
+      if [[ "$DEL" =~ ^[0-9]+$ ]]; then DEL="${MAP[$DEL]}"; fi
       [ -z "$DEL" ] && { echo "batal"; read -rp "enter..."; continue; }
 
       read -rp "Yakin hapus $DEL ? [y/N]: " YA
       [[ "$YA" =~ ^[Yy]$ ]] || { echo "batal"; read -rp "enter..."; continue; }
 
       docker rm -f "$DEL" 2>/dev/null || true
-
       short="${DEL#xray-}"
       rm -f "$NGINX_CONF_DIR/xray-${short}.conf"
       delete_profile_json "$short"
-
       nginx -t >/dev/null 2>&1 && (systemctl reload nginx 2>/dev/null || true)
 
       echo "✅ $DEL dihapus (container + nginx + profiles.json)"
       read -rp "enter..."
     ;;
     4)
-      if [ ! -f "$PROFILE_FILE" ]; then
-        echo "profiles.json belum ada."
-        read -rp "enter..."
-        continue
-      fi
-      if ! command -v jq >/dev/null 2>&1; then
-        echo "jq gak ada. apt-get install -y jq"
-        read -rp "enter..."
-        continue
-      fi
+      if [ ! -f "$PROFILE_FILE" ]; then echo "profiles.json belum ada."; read -rp "enter..."; continue; fi
+      if ! command -v jq >/dev/null 2>&1; then echo "jq gak ada. apt-get install -y jq"; read -rp "enter..."; continue; fi
 
       mapfile -t LINES < <(jq -r '.[] | select(.domain != null and .domain != "") | "\(.username) \(.domain) \(.port_vless) \(.port_vmess) \(.port_trojan)"' "$PROFILE_FILE")
-
-      if [ ${#LINES[@]} -eq 0 ]; then
-        echo "gak ada profile yang punya domain."
-        read -rp "enter..."
-        continue
-      fi
+      if [ ${#LINES[@]} -eq 0 ]; then echo "gak ada profile yang punya domain."; read -rp "enter..."; continue; fi
 
       echo "Pilih profile yang mau di-issue SSL:"
-      idx=0
-      declare -A UMAP
+      idx=0; declare -A UMAP
       for line in "${LINES[@]}"; do
         idx=$((idx+1))
         user="$(echo "$line" | awk '{print $1}')"
@@ -511,8 +421,7 @@ while true; do
             echo "⚠️ skip nginx buat $user karena SSL gagal"
           fi
         done
-        read -rp "enter..."
-        continue
+        read -rp "enter..."; continue
       fi
 
       if [[ "$PICK" =~ ^[0-9]+$ ]] && [ -n "${UMAP[$PICK]}" ]; then
@@ -534,11 +443,7 @@ while true; do
 
       read -rp "enter..."
     ;;
-    0)
-      exit 0
-    ;;
-    *)
-      echo "pilihan gak dikenal"; read -rp "enter..."
-    ;;
+    0) exit 0 ;;
+    *) echo "pilihan gak dikenal"; read -rp "enter..." ;;
   esac
 done

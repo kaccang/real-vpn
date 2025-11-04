@@ -20,8 +20,8 @@ mkdir -p /var/run/sshd /var/log/xray /var/log/supervisor /etc/xray
 
 # simpan domain buat script add-vless, add-vmess, dll
 echo "${XRAY_DOMAIN}" > /etc/xray/domain
-curl -s ipinfo.io/org | cut -d ' ' -f 2- > /etc/xray/isp || true
-curl -s ipinfo.io/city > /etc/xray/city || true
+curl -s ipinfo.io/org | cut -d ' ' -f 2- > /etc/xray/isp
+curl -s ipinfo.io/city > /etc/xray/city
 
 # install rclone
 curl -fsSL https://rclone.org/install.sh | bash
@@ -42,7 +42,7 @@ if [ -n "$XRAY_HOSTNAME" ]; then
   fi
 fi
 
-# ====== VNSTAT (non-fatal) ======
+# ====== VNSTAT ======
 if [ -z "$VNSTAT_IFACE" ]; then
   echo "[vnstat] VNSTAT_IFACE belum di-set, deteksi otomatis..."
   VNSTAT_IFACE="$(
@@ -61,22 +61,15 @@ else
 fi
 
 mkdir -p /var/lib/vnstat
-
 set +e
 echo "[vnstat] init database (vnstatd --initdb)..."
 /usr/sbin/vnstatd --initdb 2>/dev/null
-
 echo "[vnstat] tambah interface ${VNSTAT_IFACE} ..."
-vnstat --add -i "${VNSTAT_IFACE}" 2>/dev/null
-ADD_RC=$?
-if [ $ADD_RC -ne 0 ]; then
-  echo "[vnstat] --add gagal / gak ada, coba gaya lama: vnstat -u -i ${VNSTAT_IFACE}"
-  vnstat -u -i "${VNSTAT_IFACE}" 2>/dev/null
-fi
+vnstat --add -i "${VNSTAT_IFACE}" 2>/dev/null || vnstat -u -i "${VNSTAT_IFACE}" 2>/dev/null
 set -e
 
 # ====== Xray config ======
-# HANYA ditulis kalau BELUM ada, supaya restore/volume tidak ketimpa
+# HANYA ditulis jika belum ada, supaya tidak overwrite file yang sudah ada/di-mount
 if [ ! -s /etc/xray/config.json ]; then
 cat >/etc/xray/config.json <<EOF
 {
