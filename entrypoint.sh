@@ -23,17 +23,23 @@ echo "${XRAY_DOMAIN}" > /etc/xray/domain
 curl -s ipinfo.io/org | cut -d ' ' -f 2- > /etc/xray/isp
 curl -s ipinfo.io/city > /etc/xray/city
 
-# install rclone
-curl -fsSL https://rclone.org/install.sh | bash
+# ====== RCLONE FIX ======
+# install rclone (skip kalau sudah ada)
+if ! command -v rclone >/dev/null 2>&1; then
+  echo "[rclone] installing..."
+  curl -fsSL https://rclone.org/install.sh | bash
+else
+  echo "[rclone] already installed: $(rclone version | head -n1)"
+fi
 
-# SSH allow password + root
+# ====== SSH CONFIG ======
 sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
 sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
 sed -i 's/^#PermitRootLogin .*/PermitRootLogin yes/' /etc/ssh/sshd_config || true
 sed -i 's/^PermitRootLogin .*/PermitRootLogin yes/' /etc/ssh/sshd_config || true
 echo "root:${ROOT_PASSWORD}" | chpasswd
 
-# ====== hostname (NON-FATAL) ======
+# ====== HOSTNAME (NON-FATAL) ======
 if [ -n "$XRAY_HOSTNAME" ]; then
   echo "$XRAY_HOSTNAME" > /etc/hostname || true
   hostname "$XRAY_HOSTNAME" 2>/dev/null || true
@@ -62,14 +68,11 @@ fi
 
 mkdir -p /var/lib/vnstat
 set +e
-echo "[vnstat] init database (vnstatd --initdb)..."
 /usr/sbin/vnstatd --initdb 2>/dev/null
-echo "[vnstat] tambah interface ${VNSTAT_IFACE} ..."
 vnstat --add -i "${VNSTAT_IFACE}" 2>/dev/null || vnstat -u -i "${VNSTAT_IFACE}" 2>/dev/null
 set -e
 
-# ====== Xray config ======
-# HANYA ditulis jika belum ada, supaya tidak overwrite file yang sudah ada/di-mount
+# ====== XRAY CONFIG ======
 if [ ! -s /etc/xray/config.json ]; then
 cat >/etc/xray/config.json <<EOF
 {
@@ -214,7 +217,7 @@ cat >/etc/xray/config.json <<EOF
 EOF
 fi
 
-# ====== supervisor ======
+# ====== SUPERVISOR ======
 cat >/etc/supervisor/supervisord.conf <<EOF
 [supervisord]
 nodaemon=true
